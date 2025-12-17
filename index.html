@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>pollz</title>
+  <meta name="description" content="polls on atproto">
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="pollz">
+  <meta property="og:description" content="polls on atproto">
+  <meta property="og:url" content="https://pollz.waow.tech">
+  <meta property="og:site_name" content="pollz">
+
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="pollz">
+  <meta name="twitter:description" content="polls on atproto">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: monospace;
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 1rem;
+      background: #0a0a0a;
+      color: #ccc;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    a { color: #888; text-decoration: none; }
+    a:hover { color: #fff; }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 0;
+      border-bottom: 1px solid #222;
+      margin-bottom: 1rem;
+    }
+    header h1 { font-size: 1rem; font-weight: normal; }
+    input, button, textarea {
+      font-family: monospace;
+      font-size: 14px;
+      padding: 0.5rem;
+      border: 1px solid #333;
+      background: #111;
+      color: #ccc;
+    }
+    input:focus, textarea:focus { outline: 1px solid #444; }
+    button { cursor: pointer; }
+    button:hover { background: #222; }
+    .poll {
+      border-bottom: 1px solid #222;
+      padding: 1rem 0;
+    }
+    .poll-question { color: #fff; margin-bottom: 0.5rem; }
+    .poll-meta { color: #555; font-size: 12px; margin-bottom: 0.5rem; }
+    .option {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.5rem 0;
+      cursor: pointer;
+    }
+    .option:hover { color: #fff; }
+    .option-text { flex: 1; }
+    .option-count { color: #888; font-size: 12px; margin-left: 1rem; }
+    .poll-detail .option {
+      position: relative;
+      padding: 0.75rem;
+      margin: 0.5rem 0;
+      background: #111;
+      border: 1px solid #222;
+    }
+    .poll-detail .option-bar {
+      position: absolute;
+      left: 0;
+      top: 0;
+      height: 100%;
+      background: #1a3a1a;
+      z-index: 0;
+      transition: width 0.3s;
+    }
+    .poll-detail .option-text,
+    .poll-detail .option-count {
+      position: relative;
+      z-index: 1;
+    }
+    .poll-detail .poll-meta {
+      margin-top: 1rem;
+    }
+    .create-form { margin-bottom: 2rem; }
+    .create-form input, .create-form textarea { width: 100%; margin-bottom: 0.5rem; }
+    .hidden { display: none; }
+    #status { color: #666; padding: 0.5rem 0; }
+    .vote-count { cursor: help; border-bottom: 1px dotted #555; }
+    .vote-count:hover { color: #fff; }
+    .voters-tooltip {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      padding: 0.5rem;
+      font-size: 12px;
+      z-index: 1000;
+      max-width: 300px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+    }
+    .voter { padding: 0.25rem 0; color: #aaa; word-break: break-all; }
+    .voter-link { color: #6af; font-size: 11px; }
+    .voter-link:hover { color: #8cf; text-decoration: underline; }
+    .vote-time { color: #555; font-size: 10px; }
+    .share-btn {
+      background: none;
+      border: 1px solid #333;
+      color: #888;
+      padding: 0.4rem 0.8rem;
+      font-family: monospace;
+      font-size: 12px;
+      cursor: pointer;
+      border-radius: 4px;
+      transition: all 0.2s;
+    }
+    .share-btn:hover { border-color: #555; color: #ccc; }
+    .share-btn.copied { border-color: #4a4; color: #6c6; }
+    .poll-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+    .poll-header h2 { margin: 0; flex: 1; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1><a href="/">pollz</a></h1>
+    <nav id="nav"></nav>
+  </header>
+  <main id="app"></main>
+  <p id="status"></p>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

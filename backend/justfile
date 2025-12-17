@@ -1,0 +1,29 @@
+# pollz backend
+
+# dev server with hot reload
+dev:
+    watchexec -r -w src -- zig build run
+
+# build release binary
+build:
+    zig build -Doptimize=ReleaseSafe
+
+# run release binary
+run: build
+    ./zig-out/bin/pollz
+
+# format code
+fmt:
+    zig fmt src/
+
+# check formatting without modifying
+check:
+    zig fmt --check src/
+
+# clean build artifacts
+clean:
+    rm -rf zig-out .zig-cache pollz.db
+
+# deploy to fly.io
+deploy:
+    fly deploy
