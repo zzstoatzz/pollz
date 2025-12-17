@@ -3,8 +3,7 @@ const net = std.net;
 const Thread = std.Thread;
 const db = @import("db.zig");
 const http_server = @import("http.zig");
-const jetstream = @import("jetstream.zig");
-const backfill = @import("backfill.zig");
+const tap = @import("tap.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -16,12 +15,11 @@ pub fn main() !void {
     try db.init(db_path);
     defer db.close();
 
-    // backfill existing records from known repos at startup
-    backfill.run(allocator);
+    // tap handles backfill automatically - no need to call backfill.run()
 
-    // start jetstream consumer in background
-    const jetstream_thread = try Thread.spawn(.{}, jetstream.consumer, .{allocator});
-    defer jetstream_thread.join();
+    // start tap consumer in background
+    const tap_thread = try Thread.spawn(.{}, tap.consumer, .{allocator});
+    defer tap_thread.join();
 
     // start http server (bind to 0.0.0.0 for containerized deployments)
     const address = try net.Address.parseIp("0.0.0.0", 3000);

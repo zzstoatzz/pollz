@@ -70,36 +70,7 @@ fn initSchema() !void {
         return err;
     };
 
-    conn.execNoArgs(
-        \\CREATE TABLE IF NOT EXISTS cursor (
-        \\  id INTEGER PRIMARY KEY CHECK (id = 1),
-        \\  time_us INTEGER NOT NULL
-        \\)
-    ) catch |err| {
-        std.debug.print("failed to create cursor table: {}\n", .{err});
-        return err;
-    };
-
     std.debug.print("database schema initialized\n", .{});
-}
-
-pub fn getCursor() ?i64 {
-    mutex.lock();
-    defer mutex.unlock();
-
-    const row = conn.row("SELECT time_us FROM cursor WHERE id = 1", .{}) catch return null;
-    if (row == null) return null;
-    defer row.?.deinit();
-    return row.?.int(0);
-}
-
-pub fn saveCursor(time_us: i64) void {
-    mutex.lock();
-    defer mutex.unlock();
-
-    conn.exec("INSERT OR REPLACE INTO cursor (id, time_us) VALUES (1, ?)", .{time_us}) catch |err| {
-        std.debug.print("failed to save cursor: {}\n", .{err});
-    };
 }
 
 pub fn insertPoll(uri: []const u8, did: []const u8, rkey: []const u8, text_json: []const u8, options_json: []const u8, created_at: []const u8) !void {
@@ -119,14 +90,17 @@ pub fn insertVote(uri: []const u8, subject: []const u8, option: i32, voter: []co
     mutex.lock();
     defer mutex.unlock();
 
-    // delete any existing vote by this user on this poll, then insert new one
-    // this enforces one vote per user per poll
-    conn.exec("DELETE FROM votes WHERE subject = ? AND voter = ?", .{ subject, voter }) catch {};
-
+    // upsert: update if exists and new vote is newer, otherwise insert
+    // this handles out-of-order events from tap
     conn.exec(
-        "INSERT INTO votes (uri, subject, option, voter, created_at) VALUES (?, ?, ?, ?, ?)",
-        .{ uri, subject, option, voter, created_at },
-    ) catch |err| {
+        \\INSERT INTO votes (uri, subject, option, voter, created_at)
+        \\VALUES (?, ?, ?, ?, ?)
+        \\ON CONFLICT(subject, voter) DO UPDATE SET
+        \\  uri = excluded.uri,
+        \\  option = excluded.option,
+        \\  created_at = excluded.created_at
+        \\WHERE excluded.created_at > votes.created_at OR votes.created_at IS NULL
+    , .{ uri, subject, option, voter, created_at }) catch |err| {
         std.debug.print("db insert vote error: {}\n", .{err});
         return err;
     };
@@ -149,6 +123,8 @@ pub fn deleteVote(uri: []const u8) void {
     mutex.lock();
     defer mutex.unlock();
 
+    // only delete if the URI matches - if a newer vote replaced this one,
+    // the URI won't match and we should not delete
     conn.exec("DELETE FROM votes WHERE uri = ?", .{uri}) catch |err| {
         std.debug.print("db delete vote error: {}\n", .{err});
     };

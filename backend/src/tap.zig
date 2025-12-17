@@ -9,12 +9,32 @@ const db = @import("db.zig");
 const POLL_COLLECTION = "tech.waow.poll";
 const VOTE_COLLECTION = "tech.waow.vote";
 
+// tap url from env or default to fly.io internal network
+fn getTapHost() []const u8 {
+    return std.posix.getenv("TAP_HOST") orelse "pollz-tap.fly.dev";
+}
+
+fn getTapPort() u16 {
+    const port_str = std.posix.getenv("TAP_PORT") orelse "443";
+    return std.fmt.parseInt(u16, port_str, 10) catch 443;
+}
+
+fn useTls() bool {
+    const port = getTapPort();
+    return port == 443;
+}
+
 pub fn consumer(allocator: Allocator) void {
+    // exponential backoff: 1s -> 2s -> 4s -> ... -> 60s cap
+    var backoff: u64 = 1;
+    const max_backoff: u64 = 60;
+
     while (true) {
         connect(allocator) catch |err| {
-            std.debug.print("jetstream error: {}, reconnecting in 3s...\n", .{err});
+            std.debug.print("tap error: {}, reconnecting in {}s...\n", .{ err, backoff });
         };
-        posix.nanosleep(3, 0);
+        posix.nanosleep(backoff, 0);
+        backoff = @min(backoff * 2, max_backoff);
     }
 }
 
@@ -25,7 +45,7 @@ const Handler = struct {
     pub fn serverMessage(self: *Handler, data: []const u8) !void {
         self.msg_count += 1;
         if (self.msg_count % 100 == 1) {
-            std.debug.print("jetstream: received {} messages\n", .{self.msg_count});
+            std.debug.print("tap: received {} messages\n", .{self.msg_count});
         }
         processMessage(self.allocator, data) catch |err| {
             std.debug.print("message processing error: {}\n", .{err});
@@ -33,46 +53,40 @@ const Handler = struct {
     }
 
     pub fn close(_: *Handler) void {
-        std.debug.print("jetstream connection closed\n", .{});
+        std.debug.print("tap connection closed\n", .{});
     }
 };
 
 fn connect(allocator: Allocator) !void {
-    const host = "jetstream1.us-east.bsky.network";
+    const host = getTapHost();
+    const port = getTapPort();
+    const tls = useTls();
 
-    var path_buf: [512]u8 = undefined;
+    const path = "/channel";
 
-    // only use saved cursor if we have one (for resuming after disconnect)
-    // otherwise start from NOW - UFOs handles backfill, Jetstream is for live events only
-    const path = if (db.getCursor()) |cursor|
-        std.fmt.bufPrint(&path_buf, "/subscribe?wantedCollections={s}&wantedCollections={s}&cursor={d}", .{ POLL_COLLECTION, VOTE_COLLECTION, cursor }) catch "/subscribe"
-    else
-        std.fmt.bufPrint(&path_buf, "/subscribe?wantedCollections={s}&wantedCollections={s}", .{ POLL_COLLECTION, VOTE_COLLECTION }) catch "/subscribe";
-
-    std.debug.print("connecting to wss://{s}{s}\n", .{ host, path });
+    std.debug.print("connecting to {s}://{s}:{d}{s}\n", .{ if (tls) "wss" else "ws", host, port, path });
 
     var client = websocket.Client.init(allocator, .{
         .host = host,
-        .port = 443,
-        .tls = true,
+        .port = port,
+        .tls = tls,
     }) catch |err| {
         std.debug.print("websocket client init failed: {}\n", .{err});
         return err;
     };
     defer client.deinit();
 
-    std.debug.print("tcp+tls connected, starting handshake...\n", .{});
+    std.debug.print("tcp connected, starting handshake...\n", .{});
 
-    // add Host header which is required for websocket handshake
-    var host_header_buf: [128]u8 = undefined;
-    const host_header = std.fmt.bufPrint(&host_header_buf, "Host: {s}\r\n", .{host}) catch "Host: jetstream1.us-east.bsky.network\r\n";
+    var host_header_buf: [256]u8 = undefined;
+    const host_header = std.fmt.bufPrint(&host_header_buf, "Host: {s}\r\n", .{host}) catch "Host: pollz-tap.fly.dev\r\n";
 
     client.handshake(path, .{ .headers = host_header }) catch |err| {
         std.debug.print("websocket handshake failed: {}\n", .{err});
         return err;
     };
 
-    std.debug.print("jetstream connected!\n", .{});
+    std.debug.print("tap connected!\n", .{});
 
     var handler = Handler{ .allocator = allocator };
     client.readLoop(&handler) catch |err| {
@@ -82,44 +96,40 @@ fn connect(allocator: Allocator) !void {
 }
 
 fn processMessage(allocator: Allocator, payload: []const u8) !void {
-    // parse jetstream event
+    // parse tap event
     const parsed = json.parseFromSlice(json.Value, allocator, payload, .{}) catch return;
     defer parsed.deinit();
 
     const root = parsed.value.object;
 
-    // save cursor from event timestamp
-    if (root.get("time_us")) |time_us_val| {
-        if (time_us_val == .integer) {
-            db.saveCursor(time_us_val.integer);
-        }
-    }
+    // tap format: { "id": 123, "type": "record", "record": { ... } }
+    const msg_type = root.get("type") orelse return;
+    if (msg_type != .string) return;
 
-    const kind = root.get("kind") orelse return;
-    if (kind != .string) return;
+    if (!mem.eql(u8, msg_type.string, "record")) return;
 
-    if (!mem.eql(u8, kind.string, "commit")) return;
+    const record_wrapper = root.get("record") orelse return;
+    if (record_wrapper != .object) return;
 
-    const commit = root.get("commit") orelse return;
-    if (commit != .object) return;
+    const rec = record_wrapper.object;
 
-    const collection = commit.object.get("collection") orelse return;
+    const collection = rec.get("collection") orelse return;
     if (collection != .string) return;
 
-    const operation = commit.object.get("operation") orelse return;
-    if (operation != .string) return;
+    const action = rec.get("action") orelse return;
+    if (action != .string) return;
 
-    const did = root.get("did") orelse return;
+    const did = rec.get("did") orelse return;
     if (did != .string) return;
 
-    const rkey = commit.object.get("rkey") orelse return;
+    const rkey = rec.get("rkey") orelse return;
     if (rkey != .string) return;
 
     const uri_str = try std.fmt.allocPrint(allocator, "at://{s}/{s}/{s}", .{ did.string, collection.string, rkey.string });
     defer allocator.free(uri_str);
 
-    if (mem.eql(u8, operation.string, "create")) {
-        const record = commit.object.get("record") orelse return;
+    if (mem.eql(u8, action.string, "create") or mem.eql(u8, action.string, "update")) {
+        const record = rec.get("record") orelse return;
         if (record != .object) return;
 
         if (mem.eql(u8, collection.string, POLL_COLLECTION)) {
@@ -131,7 +141,7 @@ fn processMessage(allocator: Allocator, payload: []const u8) !void {
                 std.debug.print("vote processing error: {}\n", .{err});
             };
         }
-    } else if (mem.eql(u8, operation.string, "delete")) {
+    } else if (mem.eql(u8, action.string, "delete")) {
         if (mem.eql(u8, collection.string, POLL_COLLECTION)) {
             db.deletePoll(uri_str);
             std.debug.print("deleted poll: {s}\n", .{uri_str});

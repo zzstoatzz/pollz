@@ -1,5 +1,6 @@
 # pollz
 mod backend
+mod tap
 
 # show available commands
 default:
@@ -18,5 +19,9 @@ deploy-frontend:
 deploy-backend:
     just backend::deploy
 
+# deploy tap to fly.io
+deploy-tap:
+    just tap::deploy
+
 # deploy everything
-deploy: deploy-backend deploy-frontend
+deploy: deploy-tap deploy-backend deploy-frontend

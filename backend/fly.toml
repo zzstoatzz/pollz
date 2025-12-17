@@ -3,6 +3,10 @@ primary_region = 'iad'
 
 [build]
 
+[env]
+  TAP_HOST = 'pollz-tap.internal'
+  TAP_PORT = '2480'
+
 [http_service]
   internal_port = 3000
   force_https = true
