@@ -1,6 +1,5 @@
 import {
   POLL,
-  VOTE,
   agent,
   currentDid,
   setAgent,
@@ -13,7 +12,6 @@ import {
   fetchPolls,
   fetchPoll,
   fetchVoters,
-  loadUserVotes,
   createPoll,
   vote,
   resolveHandle,
@@ -30,63 +28,6 @@ const setStatus = (msg: string) => (status.textContent = msg);
 
 // track if a vote is in progress to prevent double-clicks
 let votingInProgress = false;
-
-// jetstream - replay last 24h on connect, then live updates
-let jetstream: WebSocket | null = null;
-
-const connectJetstream = () => {
-  if (jetstream?.readyState === WebSocket.OPEN) return;
-
-  const cursor = (Date.now() - 24 * 60 * 60 * 1000) * 1000;
-  const url = `wss://jetstream1.us-east.bsky.network/subscribe?wantedCollections=${POLL}&wantedCollections=${VOTE}&cursor=${cursor}`;
-  jetstream = new WebSocket(url);
-
-  jetstream.onmessage = (event) => {
-    const msg = JSON.parse(event.data);
-    if (msg.kind !== "commit") return;
-
-    const { commit } = msg;
-    const uri = `at://${msg.did}/${commit.collection}/${commit.rkey}`;
-
-    if (commit.collection === POLL) {
-      if (commit.operation === "create" && commit.record) {
-        polls.set(uri, {
-          uri,
-          repo: msg.did,
-          rkey: commit.rkey,
-          text: commit.record.text,
-          options: commit.record.options,
-          createdAt: commit.record.createdAt,
-          votes: new Map(),
-        });
-        render();
-      } else if (commit.operation === "delete") {
-        polls.delete(uri);
-        render();
-      }
-    }
-
-    if (commit.collection === VOTE) {
-      if (commit.operation === "create" && commit.record) {
-        const poll = polls.get(commit.record.subject);
-        if (poll && !poll.votes.has(uri)) {
-          poll.votes.set(uri, commit.record.option);
-          render();
-        }
-      } else if (commit.operation === "delete") {
-        for (const poll of polls.values()) {
-          if (poll.votes.has(uri)) {
-            poll.votes.delete(uri);
-            render();
-            break;
-          }
-        }
-      }
-    }
-  };
-
-  jetstream.onclose = () => setTimeout(connectJetstream, 3000);
-};
 
 // render
 const render = () => {
@@ -136,7 +77,6 @@ const renderHome = async (mineOnly: boolean = false) => {
 
   try {
     await fetchPolls();
-    await loadUserVotes();
 
     let filteredPolls = Array.from(polls.values());
     if (mineOnly && currentDid) {
@@ -184,6 +124,7 @@ const renderPollCard = (p: Poll) => {
 // voters tooltip
 type VoteInfo = { voter: string; option: number; uri: string; createdAt?: string; handle?: string };
 const votersCache = new Map<string, VoteInfo[]>();
+const pollOptionsCache = new Map<string, string[]>(); // for tooltip option names
 let activeTooltip: HTMLElement | null = null;
 let tooltipTimeout: ReturnType<typeof setTimeout> | null = null;
 
@@ -217,7 +158,7 @@ const showVotersTooltip = async (e: Event) => {
   }));
 
   const poll = polls.get(pollUri);
-  const options = poll?.options || [];
+  const options = poll?.options || pollOptionsCache.get(pollUri) || [];
 
   if (activeTooltip) activeTooltip.remove();
 
@@ -275,22 +216,17 @@ const attachVoteHandlers = () => {
 };
 
 const handleVote = async (pollUri: string, option: number) => {
-  console.log("[handleVote] called", { pollUri, option, votingInProgress, agent: !!agent, currentDid });
-
   if (!agent || !currentDid) {
     setStatus("login to vote");
-    console.log("[handleVote] not logged in, returning");
     return;
   }
 
   if (votingInProgress) {
-    console.log("[handleVote] vote already in progress, returning");
     return;
   }
 
   votingInProgress = true;
   setStatus("voting...");
-  console.log("[handleVote] set votingInProgress=true, calling vote()");
 
   // disable all vote options visually
   app.querySelectorAll("[data-vote]").forEach((el) => {
@@ -299,7 +235,6 @@ const handleVote = async (pollUri: string, option: number) => {
 
   try {
     await vote(pollUri, option);
-    console.log("[handleVote] vote() completed successfully");
     setStatus("confirming...");
 
     // poll backend until vote is confirmed (tap needs time to process)
@@ -310,19 +245,19 @@ const handleVote = async (pollUri: string, option: number) => {
     while (Date.now() - start < maxWait) {
       const voters = await fetchVoters(pollUri);
       const myVote = voters.find(v => v.voter === currentDid);
-      console.log("[handleVote] polling backend", { myVote, elapsed: Date.now() - start });
       if (myVote && myVote.option === option) {
-        console.log("[handleVote] vote confirmed in backend");
         break;
       }
       await new Promise(r => setTimeout(r, pollInterval));
     }
 
+    // clear voters cache so tooltip shows fresh data
+    votersCache.delete(pollUri);
+
     setStatus("");
-    console.log("[handleVote] calling render()");
     render();
   } catch (e) {
-    console.error("[handleVote] error:", e);
+    console.error("vote error:", e);
     setStatus(`error: ${e}`);
     setTimeout(() => {
       setStatus("");
@@ -330,7 +265,6 @@ const handleVote = async (pollUri: string, option: number) => {
     }, 2000);
   } finally {
     votingInProgress = false;
-    console.log("[handleVote] finally, votingInProgress=false");
   }
 };
 
@@ -373,6 +307,8 @@ const renderPollPage = async (repo: string, rkey: string) => {
     const data = await fetchPoll(uri);
 
     if (data) {
+      // cache options for tooltip
+      pollOptionsCache.set(uri, data.options.map(o => o.text));
       const total = data.options.reduce((sum, o) => sum + o.count, 0);
       const disabled = votingInProgress ? " disabled" : "";
 
@@ -411,7 +347,7 @@ const renderPollPage = async (repo: string, rkey: string) => {
       return;
     }
 
-    const poll: Poll = { ...pdsData, votes: new Map() };
+    const poll: Poll = { ...pdsData };
     polls.set(uri, poll);
 
     app.innerHTML = `<p><a href="/">&larr; back</a></p>${renderPollCard(poll)}`;
@@ -494,6 +430,5 @@ document.addEventListener("click", (e) => {
 (async () => {
   await handleOAuthCallback();
   await restoreSession();
-  connectJetstream();
   render();
 })();

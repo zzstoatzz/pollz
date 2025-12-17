@@ -63,7 +63,6 @@ export type Poll = {
   text: string;
   options: string[];
   createdAt: string;
-  votes: Map<string, number>;
   voteCount?: number;
 };
 
@@ -139,7 +138,6 @@ export const fetchPolls = async (): Promise<void> => {
         text: p.text,
         options: p.options,
         createdAt: p.createdAt,
-        votes: new Map(),
         voteCount: p.voteCount,
       });
     }
@@ -165,32 +163,6 @@ export const fetchVoters = async (pollUri: string) => {
   return res.json() as Promise<Array<{ voter: string; option: number; uri: string; createdAt?: string }>>;
 };
 
-// user votes
-export const loadUserVotes = async (): Promise<void> => {
-  if (!agent || !currentDid) return;
-
-  try {
-    const rpc = new Client({ handler: agent });
-    const res = await rpc.get("com.atproto.repo.listRecords", {
-      params: { repo: currentDid, collection: VOTE, limit: 100 },
-    });
-
-    if (res.ok) {
-      for (const record of res.data.records) {
-        const val = record.value as { subject?: string; option?: number };
-        if (val.subject && typeof val.option === "number") {
-          const poll = polls.get(val.subject);
-          if (poll) {
-            poll.votes.set(record.uri, val.option);
-          }
-        }
-      }
-    }
-  } catch (e) {
-    console.error("failed to load user votes:", e);
-  }
-};
-
 // create poll
 export const createPoll = async (text: string, options: string[]): Promise<string | null> => {
   if (!agent || !currentDid) return null;
@@ -214,7 +186,6 @@ export const createPoll = async (text: string, options: string[]): Promise<strin
     text,
     options,
     createdAt: new Date().toISOString(),
-    votes: new Map(),
   });
 
   return res.data.uri;
