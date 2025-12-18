@@ -180,10 +180,10 @@ fn handleGetPoll(request: *http.Server.Request, uri_encoded: []const u8) !void {
             break :blk 0;
         };
 
-        const opt_text = if (opt == .string) opt.string else "";
+        // use json.fmt to properly escape quotes and special chars
         try response.print(alloc,
-            \\{{"text":"{s}","count":{d}}}
-        , .{ opt_text, count });
+            \\{{"text":{f},"count":{d}}}
+        , .{ json.fmt(opt, .{}), count });
     }
 
     try response.print(alloc,
