@@ -26,6 +26,18 @@ const status = document.getElementById("status")!;
 
 const setStatus = (msg: string) => (status.textContent = msg);
 
+const showToast = (msg: string) => {
+  const existing = document.querySelector(".toast");
+  if (existing) existing.remove();
+
+  const toast = document.createElement("div");
+  toast.className = "toast";
+  toast.textContent = msg;
+  document.body.appendChild(toast);
+
+  setTimeout(() => toast.remove(), 3000);
+};
+
 // track if a vote is in progress to prevent double-clicks
 let votingInProgress = false;
 
@@ -217,7 +229,7 @@ const attachVoteHandlers = () => {
 
 const handleVote = async (pollUri: string, option: number) => {
   if (!agent || !currentDid) {
-    setStatus("login to vote");
+    showToast("login to vote");
     return;
   }
 
