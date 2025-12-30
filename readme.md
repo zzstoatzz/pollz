@@ -1,6 +1,6 @@
 # pollz
 
-polls on atproto
+polls on atproto ([lexicon](https://ufos.microcosm.blue/collection/?nsid=tech.waow.pollz1))
 
 ```
 firehose → tap → backend (zig + sqlite) → frontend
