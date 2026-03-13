@@ -1,6 +1,5 @@
 # pollz
 mod backend
-mod tap
 
 # show available commands
 default:
@@ -8,20 +7,16 @@ default:
 
 # build frontend
 build:
-    pnpm build
+    cd frontend && pnpm build
 
 # deploy frontend to cloudflare pages
 deploy-frontend:
-    pnpm build
-    npx wrangler pages deploy dist --project-name=pollz-waow-tech --commit-dirty=true
+    cd frontend && pnpm build
+    npx wrangler pages deploy frontend/build --project-name=pollz-waow-tech --commit-dirty=true
 
 # deploy backend to fly.io
 deploy-backend:
     just backend::deploy
 
-# deploy tap to fly.io
-deploy-tap:
-    just tap::deploy
-
 # deploy everything
-deploy: deploy-tap deploy-backend deploy-frontend
+deploy: deploy-backend deploy-frontend

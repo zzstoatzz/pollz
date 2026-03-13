@@ -4,9 +4,9 @@
     .fingerprint = 0x855197507943a911,
     .minimum_zig_version = "0.15.0",
     .dependencies = .{
-        .websocket = .{
-            .url = "https://github.com/karlseguin/websocket.zig/archive/refs/heads/master.tar.gz",
-            .hash = "websocket-0.1.0-ZPISdRNzAwAGszh62EpRtoQxu8wb1MSMVI6Ow0o2dmyJ",
+        .zat = .{
+            .url = "https://tangled.org/zat.dev/zat/archive/v0.2.16.tar.gz",
+            .hash = "zat-0.2.16-5PuC7tjwBADbnwV5y8ztKUHhGHMJHh2HouvoYImnZ7y5",
         },
         .zqlite = .{
             .url = "git+https://github.com/karlseguin/zqlite.zig?ref=master#e041f81c6b11b7381b6358030d57ca95dcd54d30",

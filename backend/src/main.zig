@@ -4,7 +4,7 @@ const posix = std.posix;
 const Thread = std.Thread;
 const db = @import("db.zig");
 const http_server = @import("http.zig");
-const tap = @import("tap.zig");
+const jetstream = @import("jetstream.zig");
 
 // max concurrent http connections (prevents resource exhaustion)
 const MAX_HTTP_WORKERS = 16;
@@ -22,9 +22,9 @@ pub fn main() !void {
     try db.init(db_path);
     defer db.close();
 
-    // start tap consumer in background
-    const tap_thread = try Thread.spawn(.{}, tap.consumer, .{allocator});
-    defer tap_thread.join();
+    // start jetstream consumer in background
+    const js_thread = try Thread.spawn(.{}, jetstream.start, .{allocator});
+    defer js_thread.join();
 
     // init thread pool for http connections
     var pool: Thread.Pool = undefined;
