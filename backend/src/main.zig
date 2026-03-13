@@ -13,9 +13,7 @@ const MAX_HTTP_WORKERS = 16;
 const SOCKET_TIMEOUT_SECS = 30;
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    const allocator = std.heap.page_allocator;
 
     // init sqlite - use DATA_PATH env or default to /data/pollz.db
     const db_path = posix.getenv("DATA_PATH") orelse "/data/pollz.db";

@@ -494,7 +494,7 @@ fn handleMe(request: *http.Server.Request) !void {
         \\{{"did":"{s}","handle":"{s}"}}
     , .{ session.did, session.handle });
 
-    try sendJsonWithCredentials(request, body.items);
+    try sendJson(request, body.items);
 }
 
 fn handleLogout(request: *http.Server.Request) !void {
@@ -581,7 +581,7 @@ fn handleCreatePoll(request: *http.Server.Request) !void {
         return;
     };
 
-    try sendJsonWithCredentials(request, result);
+    try sendJson(request, result);
 }
 
 fn handleVote(request: *http.Server.Request) !void {
@@ -642,7 +642,7 @@ fn handleVote(request: *http.Server.Request) !void {
         return;
     };
 
-    try sendJsonWithCredentials(request, result);
+    try sendJson(request, result);
 }
 
 fn handleDeletePoll(request: *http.Server.Request, uri_encoded: []const u8) !void {
@@ -704,7 +704,7 @@ fn handleDeletePoll(request: *http.Server.Request, uri_encoded: []const u8) !voi
     // also delete from local DB
     db.deletePoll(poll_uri);
 
-    try sendJsonWithCredentials(request, "{\"ok\":true}");
+    try sendJson(request, "{\"ok\":true}");
 }
 
 // --- profile resolution ---
@@ -741,9 +741,9 @@ fn getOrFetchProfile(alloc: std.mem.Allocator, did: []const u8) db.Profile {
         if (now - profile.fetched_at < PROFILE_CACHE_SECS) {
             return profile;
         }
-        // stale — serve it but refresh in background would be nice
-        // for now just return stale data, fetch will happen on next miss
-        return profile;
+        // stale — re-fetch synchronously
+        fetchAndCacheProfile(alloc, did);
+        return db.getProfile(did) orelse profile;
     }
 
     // cache miss — fetch synchronously
@@ -1017,10 +1017,6 @@ fn sendJson(request: *http.Server.Request, body: []const u8) !void {
             .{ .name = "access-control-allow-headers", .value = "content-type" },
         },
     });
-}
-
-fn sendJsonWithCredentials(request: *http.Server.Request, body: []const u8) !void {
-    try sendJson(request, body);
 }
 
 fn sendCorsHeaders(request: *http.Server.Request, body: []const u8) !void {
@@ -1392,72 +1388,74 @@ fn pdsAuthedRequest(alloc: std.mem.Allocator, session: db.Session, method_str: [
     const ath = try oauth.accessTokenHash(alloc, session.access_token);
     defer alloc.free(ath);
 
-    const dpop_proof = try oauth.createDpopProof(
-        alloc,
-        &dpop_keypair,
-        method_str,
-        url,
-        if (session.dpop_pds_nonce.len > 0) session.dpop_pds_nonce else null,
-        ath,
-    );
-    defer alloc.free(dpop_proof);
+    var nonce: ?[]const u8 = if (session.dpop_pds_nonce.len > 0) session.dpop_pds_nonce else null;
 
-    var auth_header_buf: [4096]u8 = undefined;
-    const auth_header = std.fmt.bufPrint(&auth_header_buf, "DPoP {s}", .{session.access_token}) catch return error.AuthHeaderTooLong;
+    // try once, retry once on DPoP nonce error (matching PAR/token pattern)
+    for (0..2) |_| {
+        const dpop_proof = try oauth.createDpopProof(alloc, &dpop_keypair, method_str, url, nonce, ath);
+        defer alloc.free(dpop_proof);
 
-    const http_method: http.Method = if (mem.eql(u8, method_str, "POST")) .POST else .GET;
+        var auth_header_buf: [4096]u8 = undefined;
+        const auth_header = std.fmt.bufPrint(&auth_header_buf, "DPoP {s}", .{session.access_token}) catch return error.AuthHeaderTooLong;
 
-    var client: std.http.Client = .{ .allocator = alloc };
-    defer client.deinit();
+        const http_method: http.Method = if (mem.eql(u8, method_str, "POST")) .POST else .GET;
 
-    var req = try client.request(http_method, try std.Uri.parse(url), .{
-        .extra_headers = &.{
-            .{ .name = "Authorization", .value = auth_header },
-            .{ .name = "DPoP", .value = dpop_proof },
-        },
-        .headers = .{
-            .content_type = .{ .override = "application/json" },
-        },
-    });
-    defer req.deinit();
+        var client: std.http.Client = .{ .allocator = alloc };
+        defer client.deinit();
 
-    if (body) |b| {
-        req.transfer_encoding = .{ .content_length = b.len };
-        var body_writer = try req.sendBodyUnflushed(&.{});
-        try body_writer.writer.writeAll(b);
-        try body_writer.end();
-        try req.connection.?.flush();
-    } else {
-        try req.sendBodiless();
-    }
+        var req = try client.request(http_method, try std.Uri.parse(url), .{
+            .extra_headers = &.{
+                .{ .name = "Authorization", .value = auth_header },
+                .{ .name = "DPoP", .value = dpop_proof },
+            },
+            .headers = .{
+                .content_type = .{ .override = "application/json" },
+            },
+        });
+        defer req.deinit();
 
-    var redirect_buf: [1]u8 = undefined;
-    var response = req.receiveHead(&redirect_buf) catch return error.FetchFailed;
-
-    // extract DPoP-Nonce from response headers
-    var header_iter = response.head.iterateHeaders();
-    while (header_iter.next()) |header| {
-        if (std.ascii.eqlIgnoreCase(header.name, "dpop-nonce")) {
-            db.updateSessionNonce(session.did, .pds, header.value);
-
-            // handle DPoP nonce retry
-            if (isDpopNonceErrorStatus(response.head.status)) {
-                var updated_session = session;
-                updated_session.dpop_pds_nonce = header.value;
-                return pdsAuthedRequest(alloc, updated_session, method_str, path, body);
-            }
-            break;
+        if (body) |b| {
+            req.transfer_encoding = .{ .content_length = b.len };
+            var body_writer = try req.sendBodyUnflushed(&.{});
+            try body_writer.writer.writeAll(b);
+            try body_writer.end();
+            try req.connection.?.flush();
+        } else {
+            try req.sendBodiless();
         }
+
+        var redirect_buf: [1]u8 = undefined;
+        var response = req.receiveHead(&redirect_buf) catch return error.FetchFailed;
+
+        // check for DPoP nonce in response
+        var new_nonce: ?[]const u8 = null;
+        var header_iter = response.head.iterateHeaders();
+        while (header_iter.next()) |header| {
+            if (std.ascii.eqlIgnoreCase(header.name, "dpop-nonce")) {
+                new_nonce = header.value;
+                break;
+            }
+        }
+
+        if (new_nonce) |n| {
+            db.updateSessionNonce(session.did, .pds, n);
+            if (isDpopNonceErrorStatus(response.head.status)) {
+                nonce = try alloc.dupe(u8, n);
+                continue; // retry with new nonce
+            }
+        }
+
+        var aw: std.Io.Writer.Allocating = .init(alloc);
+        const reader = response.reader(&.{});
+        _ = reader.streamRemaining(&aw.writer) catch {
+            aw.deinit();
+            return error.FetchFailed;
+        };
+
+        return aw.toOwnedSlice() catch error.FetchFailed;
     }
 
-    var aw: std.Io.Writer.Allocating = .init(alloc);
-    const reader = response.reader(&.{});
-    _ = reader.streamRemaining(&aw.writer) catch {
-        aw.deinit();
-        return error.FetchFailed;
-    };
-
-    return aw.toOwnedSlice() catch error.FetchFailed;
+    return error.DpopNonceRetryExhausted;
 }
 
 fn isDpopNonceError(status: http.Status, body: []const u8) bool {

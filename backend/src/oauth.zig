@@ -23,7 +23,7 @@ pub fn createJwt(allocator: Allocator, header_json: []const u8, payload_json: []
     defer allocator.free(signing_input);
 
     const sig = try keypair.sign(signing_input);
-    const sig_b64 = try base64urlEncodeBytes(allocator, &sig.bytes);
+    const sig_b64 = try base64urlEncode(allocator, &sig.bytes);
     defer allocator.free(sig_b64);
 
     return std.fmt.allocPrint(allocator, "{s}.{s}", .{ signing_input, sig_b64 });
@@ -87,9 +87,9 @@ pub fn jwkThumbprint(allocator: Allocator, keypair: *const zat.Keypair) ![]u8 {
     const kp = Scheme.KeyPair.fromSecretKey(sk) catch return error.InvalidSecretKey;
     const uncompressed = kp.public_key.toUncompressedSec1();
 
-    const x_b64 = try base64urlEncodeBytes(allocator, uncompressed[1..33]);
+    const x_b64 = try base64urlEncode(allocator, uncompressed[1..33]);
     defer allocator.free(x_b64);
-    const y_b64 = try base64urlEncodeBytes(allocator, uncompressed[33..65]);
+    const y_b64 = try base64urlEncode(allocator, uncompressed[33..65]);
     defer allocator.free(y_b64);
 
     const input = try std.fmt.allocPrint(allocator,
@@ -99,7 +99,7 @@ pub fn jwkThumbprint(allocator: Allocator, keypair: *const zat.Keypair) ![]u8 {
 
     var hash: [32]u8 = undefined;
     crypto.hash.sha2.Sha256.hash(input, &hash, .{});
-    return base64urlEncodeBytes(allocator, &hash);
+    return base64urlEncode(allocator, &hash);
 }
 
 /// create a `private_key_jwt` client assertion for token endpoint auth.
@@ -138,7 +138,7 @@ pub fn createClientAssertion(
 pub fn generatePkceChallenge(allocator: Allocator, verifier: []const u8) ![]u8 {
     var hash: [32]u8 = undefined;
     crypto.hash.sha2.Sha256.hash(verifier, &hash, .{});
-    return base64urlEncodeBytes(allocator, &hash);
+    return base64urlEncode(allocator, &hash);
 }
 
 /// generate a random PKCE code verifier (43 chars, base64url-encoded 32 random bytes).
@@ -146,7 +146,7 @@ pub fn generatePkceChallenge(allocator: Allocator, verifier: []const u8) ![]u8 {
 pub fn generatePkceVerifier(allocator: Allocator) ![]u8 {
     var random_bytes: [32]u8 = undefined;
     crypto.random.bytes(&random_bytes);
-    return base64urlEncodeBytes(allocator, &random_bytes);
+    return base64urlEncode(allocator, &random_bytes);
 }
 
 /// generate a random state parameter.
@@ -154,7 +154,7 @@ pub fn generatePkceVerifier(allocator: Allocator) ![]u8 {
 pub fn generateState(allocator: Allocator) ![]u8 {
     var random_bytes: [16]u8 = undefined;
     crypto.random.bytes(&random_bytes);
-    return base64urlEncodeBytes(allocator, &random_bytes);
+    return base64urlEncode(allocator, &random_bytes);
 }
 
 // --- JWK ---
@@ -172,10 +172,10 @@ pub fn jwkPublicKey(allocator: Allocator, keypair: *const zat.Keypair) ![]u8 {
     const x = uncompressed[1..33];
     const y = uncompressed[33..65];
 
-    const x_b64 = try base64urlEncodeBytes(allocator, x);
+    const x_b64 = try base64urlEncode(allocator, x);
     defer allocator.free(x_b64);
 
-    const y_b64 = try base64urlEncodeBytes(allocator, y);
+    const y_b64 = try base64urlEncode(allocator, y);
     defer allocator.free(y_b64);
 
     // JWK thumbprint (RFC 7638): SHA-256 of canonical JSON with members in lexicographic order
@@ -186,7 +186,7 @@ pub fn jwkPublicKey(allocator: Allocator, keypair: *const zat.Keypair) ![]u8 {
 
     var thumbprint_hash: [32]u8 = undefined;
     crypto.hash.sha2.Sha256.hash(thumbprint_input, &thumbprint_hash, .{});
-    const kid = try base64urlEncodeBytes(allocator, &thumbprint_hash);
+    const kid = try base64urlEncode(allocator, &thumbprint_hash);
     defer allocator.free(kid);
 
     return std.fmt.allocPrint(allocator,
@@ -212,7 +212,7 @@ pub fn jwksJson(allocator: Allocator, keypair: *const zat.Keypair) ![]u8 {
 pub fn accessTokenHash(allocator: Allocator, access_token: []const u8) ![]u8 {
     var hash: [32]u8 = undefined;
     crypto.hash.sha2.Sha256.hash(access_token, &hash, .{});
-    return base64urlEncodeBytes(allocator, &hash);
+    return base64urlEncode(allocator, &hash);
 }
 
 // --- form URL encoding ---
@@ -242,14 +242,10 @@ fn base64urlEncode(allocator: Allocator, data: []const u8) ![]u8 {
     return buf;
 }
 
-fn base64urlEncodeBytes(allocator: Allocator, data: []const u8) ![]u8 {
-    return base64urlEncode(allocator, data);
-}
-
 fn generateJti(allocator: Allocator) ![]u8 {
     var random_bytes: [16]u8 = undefined;
     crypto.random.bytes(&random_bytes);
-    return base64urlEncodeBytes(allocator, &random_bytes);
+    return base64urlEncode(allocator, &random_bytes);
 }
 
 fn percentEncode(allocator: Allocator, buf: *std.ArrayList(u8), input: []const u8) !void {
